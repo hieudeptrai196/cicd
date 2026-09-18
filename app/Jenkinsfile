@@ -1,0 +1,106 @@
+// Jenkinsfile = "pipeline as code". Định nghĩa này được lưu trong repo, không
+// phải cấu hình rời trên Jenkins UI - nhờ vậy pipeline được review/versioned
+// giống như code.
+pipeline {
+    agent any
+
+    environment {
+        // Đổi các giá trị này cho khớp với infra/group_vars/all.yml và
+        // deploy/group_vars/all.yml của bạn.
+        HARBOR_REGISTRY   = "harbor.local"
+        HARBOR_PROJECT    = "cicd-demo"
+        IMAGE_NAME        = "app"
+        // Tag theo git SHA (7 ký tự đầu) - KHÔNG dùng "latest". Nhờ vậy mỗi
+        // image là bất biến (immutable) và có thể truy vết ngược từ container
+        // đang chạy về đúng commit đã build ra nó, và rollback = chạy lại tag cũ.
+        IMAGE_TAG         = "${env.GIT_COMMIT.take(7)}"
+        FULL_IMAGE        = "${HARBOR_REGISTRY}/${HARBOR_PROJECT}/${IMAGE_NAME}:${IMAGE_TAG}"
+        // Credential kiểu "Username with password" tạo trong Jenkins Credentials
+        // Store, KHÔNG hardcode user/password vào Jenkinsfile.
+        HARBOR_CREDENTIAL = credentials('harbor-robot-account')
+    }
+
+    options {
+        timestamps()
+        // Tránh 2 build cùng lúc ghi đè lẫn nhau lên cùng 1 target deploy.
+        disableConcurrentBuilds()
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('Install deps') {
+            steps {
+                dir('app') {
+                    sh 'npm install'
+                }
+            }
+        }
+
+        stage('Test') {
+            steps {
+                dir('app') {
+                    sh 'npm test'
+                }
+            }
+            // Nếu stage này fail, pipeline dừng NGAY tại đây - không build,
+            // không push, không deploy image chưa qua test.
+        }
+
+        stage('Build image') {
+            steps {
+                dir('app') {
+                    sh "docker build -t ${FULL_IMAGE} ."
+                }
+            }
+        }
+
+        stage('Push to Harbor') {
+            steps {
+                sh '''
+                    echo "$HARBOR_CREDENTIAL_PSW" | docker login "$HARBOR_REGISTRY" \
+                        -u "$HARBOR_CREDENTIAL_USR" --password-stdin
+                    docker push "$FULL_IMAGE"
+                '''
+            }
+        }
+
+        stage('Kiem tra ket qua scan bao mat') {
+            steps {
+                sh """
+                    ansible-playbook ../deploy/playbook-check-scan.yml \
+                        -e image_tag=${IMAGE_TAG}
+                """
+            }
+            // deploy/playbook-check-scan.yml gọi API của Harbor, đợi Trivy scan
+            // xong, và FAIL playbook (=> fail stage này) nếu tìm thấy lỗ hổng
+            // mức Critical. Xem docs/04-failure-cases.md.
+        }
+
+        stage('Deploy (Ansible)') {
+            steps {
+                sh """
+                    ansible-playbook ../deploy/playbook-deploy.yml \
+                        -e image_tag=${IMAGE_TAG}
+                """
+            }
+            // playbook-deploy.yml tự làm health-check và tự rollback nếu container
+            // mới không "khoẻ" - nếu rollback xảy ra, playbook vẫn exit khác 0 để
+            // Jenkins đánh dấu build này là FAILURE (dù server đã tự hồi phục).
+        }
+    }
+
+    post {
+        always {
+            sh 'docker logout "$HARBOR_REGISTRY" || true'
+        }
+        failure {
+            echo 'Pipeline FAILED - xem log stage nào đỏ ở trên. Không có gì được ' +
+                 'deploy nếu Test/Scan fail; nếu Deploy fail, Ansible đã tự rollback.'
+        }
+    }
+}

@@ -1,0 +1,23 @@
+services:
+  jenkins:
+    image: cicd-jenkins:custom
+    container_name: jenkins
+    restart: unless-stopped
+    ports:
+      - "{{ jenkins_http_port }}:8080"
+      - "{{ jenkins_agent_port }}:50000"
+    volumes:
+      - jenkins_home:/var/jenkins_home
+      # Mount Docker socket của host vào trong container Jenkins (kỹ thuật
+      # "Docker-outside-of-Docker") để pipeline build được image Docker mà
+      # không cần chạy Docker-in-Docker phức tạp/thiếu ổn định.
+      # ĐÁNH ĐỔI BẢO MẬT: bất kỳ ai chạy được lệnh trong container Jenkins đều
+      # coi như có quyền root trên HOST (vì điều khiển được Docker daemon của
+      # host). Đây là điểm rất hay bị hỏi khi phỏng vấn - xem docs/03-security.md.
+      - /var/run/docker.sock:/var/run/docker.sock
+    group_add:
+      - "{{ docker_gid }}"
+
+volumes:
+  jenkins_home:
+    driver: local

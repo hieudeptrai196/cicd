@@ -1,0 +1,62 @@
+---
+- name: Tạo thư mục chứa Dockerfile và dữ liệu Jenkins
+  file:
+    path: "{{ jenkins_home }}"
+    state: directory
+    mode: "0755"
+
+- name: Copy Dockerfile custom (Jenkins + Docker CLI + ansible-core)
+  copy:
+    src: Dockerfile
+    dest: "{{ jenkins_home }}/Dockerfile"
+    mode: "0644"
+
+- name: Build image Jenkins custom
+  community.docker.docker_image:
+    name: cicd-jenkins
+    tag: custom
+    build:
+      path: "{{ jenkins_home }}"
+      pull: true
+    source: build
+    force_source: true
+
+- name: Lấy GID của group "docker" trên host
+  command: getent group docker
+  register: docker_group_info
+  changed_when: false
+  # Cần GID này để thêm container Jenkins vào group docker của host, nhờ đó
+  # user "jenkins" bên trong container có quyền gọi /var/run/docker.sock đã mount.
+
+- name: Set fact docker_gid
+  set_fact:
+    docker_gid: "{{ docker_group_info.stdout.split(':')[2] }}"
+
+- name: Sinh docker-compose.yml cho Jenkins
+  template:
+    src: docker-compose.jenkins.yml.j2
+    dest: "{{ jenkins_home }}/docker-compose.yml"
+    mode: "0644"
+
+- name: Khởi động Jenkins bằng docker compose
+  community.docker.docker_compose_v2:
+    project_src: "{{ jenkins_home }}"
+    state: present
+
+- name: Đợi Jenkins sẵn sàng (port {{ jenkins_http_port }})
+  wait_for:
+    port: "{{ jenkins_http_port }}"
+    delay: 5
+    timeout: 180
+
+- name: Lấy initial admin password (chỉ tồn tại ở lần cài đầu tiên)
+  command: docker exec jenkins cat /var/jenkins_home/secrets/initialAdminPassword
+  register: jenkins_initial_password
+  changed_when: false
+  failed_when: false
+
+- name: In initial admin password (chỉ dùng để setup Jenkins qua UI lần đầu)
+  debug:
+    msg: >-
+      {{ jenkins_initial_password.stdout | default('Jenkins đã setup xong trước đó
+      - không còn initial admin password.') }}

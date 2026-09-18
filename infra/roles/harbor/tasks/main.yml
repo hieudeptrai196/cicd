@@ -1,0 +1,61 @@
+---
+- name: Kiểm tra Harbor đã được cài chưa (idempotency check)
+  stat:
+    path: "{{ harbor_home }}/docker-compose.yml"
+  register: harbor_installed
+  # Bộ cài offline của Harbor (install.sh) KHÔNG được thiết kế để re-run an
+  # toàn cho việc nâng cấp - nó chỉ nên chạy 1 lần. Vì vậy toàn bộ role này
+  # dùng file docker-compose.yml sinh ra sau khi cài làm "marker" để bỏ qua
+  # các bước cài đặt nếu đã chạy trước đó. Nâng cấp Harbor là một quy trình
+  # RIÊNG (theo tài liệu chính thức), không phải chạy lại role này.
+
+- name: Tải Harbor offline installer
+  get_url:
+    url: "https://github.com/goharbor/harbor/releases/download/{{ harbor_version }}/harbor-offline-installer-{{ harbor_version }}.tgz"
+    dest: "/tmp/harbor-offline-installer-{{ harbor_version }}.tgz"
+    mode: "0644"
+  when: not harbor_installed.stat.exists
+
+- name: Giải nén Harbor installer vào /tmp
+  unarchive:
+    src: "/tmp/harbor-offline-installer-{{ harbor_version }}.tgz"
+    dest: /tmp
+    remote_src: true
+  when: not harbor_installed.stat.exists
+
+- name: Tạo thư mục lưu trữ dữ liệu Harbor lâu dài
+  file:
+    path: "{{ harbor_home }}/data"
+    state: directory
+    mode: "0755"
+  when: not harbor_installed.stat.exists
+
+- name: Sinh file cấu hình harbor.yml từ template
+  template:
+    src: harbor.yml.j2
+    dest: /tmp/harbor/harbor.yml
+    mode: "0644"
+  when: not harbor_installed.stat.exists
+
+- name: Chạy install.sh của Harbor (chỉ 1 lần duy nhất)
+  command: ./install.sh
+  args:
+    chdir: /tmp/harbor
+  when: not harbor_installed.stat.exists
+  # install.sh tự sinh ra docker-compose.yml trong /tmp/harbor và docker compose
+  # up luôn. Bước tiếp theo copy toàn bộ thư mục này sang harbor_home để việc
+  # kiểm tra "đã cài chưa" ở đầu playbook không phụ thuộc vào /tmp (có thể bị
+  # dọn sau khi reboot).
+
+- name: Copy thư mục cài đặt Harbor sang nơi lưu trữ lâu dài
+  copy:
+    src: /tmp/harbor/
+    dest: "{{ harbor_home }}/"
+    remote_src: true
+  when: not harbor_installed.stat.exists
+
+- name: Đợi Harbor sẵn sàng (port {{ harbor_http_port }})
+  wait_for:
+    port: "{{ harbor_http_port }}"
+    delay: 5
+    timeout: 180

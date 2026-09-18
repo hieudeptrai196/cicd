@@ -1,0 +1,12 @@
+---
+# Provision toàn bộ hạ tầng CI/CD trên 1 server: Docker engine -> Jenkins -> Harbor.
+# Thứ tự role quan trọng: jenkins và harbor đều chạy bằng Docker container,
+# nên docker phải được cài xong trước. Giữa jenkins và harbor không phụ thuộc
+# lẫn nhau nên thứ tự của 2 role này không quan trọng.
+- name: Provision CI/CD server (Docker + Jenkins + Harbor)
+  hosts: cicd_server
+  become: true
+  roles:
+    - docker
+    - jenkins
+    - harbor

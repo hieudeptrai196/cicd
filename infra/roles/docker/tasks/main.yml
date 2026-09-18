@@ -1,0 +1,75 @@
+---
+- name: Cài các gói phụ thuộc để thêm APT repo qua HTTPS
+  apt:
+    name:
+      - ca-certificates
+      - curl
+      - gnupg
+    state: present
+    update_cache: true
+
+- name: Tạo thư mục keyring cho Docker GPG key
+  file:
+    path: /etc/apt/keyrings
+    state: directory
+    mode: "0755"
+
+- name: Tải Docker GPG key
+  get_url:
+    url: "https://download.docker.com/linux/{{ ansible_distribution | lower }}/gpg"
+    dest: /etc/apt/keyrings/docker.asc
+    mode: "0644"
+
+- name: Thêm Docker APT repository chính thức
+  apt_repository:
+    repo: >-
+      deb [arch={{ 'amd64' if ansible_architecture == 'x86_64' else ansible_architecture }}
+      signed-by=/etc/apt/keyrings/docker.asc]
+      https://download.docker.com/linux/{{ ansible_distribution | lower }}
+      {{ ansible_distribution_release }} stable
+    state: present
+    filename: docker
+
+- name: Cài Docker Engine + Compose plugin + Buildx
+  apt:
+    name:
+      - docker-ce
+      - docker-ce-cli
+      - containerd.io
+      - docker-buildx-plugin
+      - docker-compose-plugin
+    state: present
+    update_cache: true
+
+- name: Đảm bảo docker service đang chạy và tự khởi động cùng hệ thống
+  systemd:
+    name: docker
+    state: started
+    enabled: true
+
+- name: Thêm user SSH vào group docker (để chạy docker không cần sudo)
+  user:
+    name: "{{ ansible_user }}"
+    groups: docker
+    append: true
+  # LƯU Ý: thay đổi group chỉ có hiệu lực ở LẦN SSH LOGIN TIẾP THEO,
+  # không áp dụng ngay trong session Ansible hiện tại. Đây là lý do một số
+  # playbook idempotent nhưng "chạy lần đầu vẫn báo lỗi permission denied ở
+  # bước sau" -> phải logout/login lại hoặc dùng `become: true` như ở đây.
+
+- name: Cấu hình Docker tin tưởng Harbor registry (HTTP, không TLS - CHỈ dùng cho lab)
+  copy:
+    content: |
+      {
+        "insecure-registries": ["{{ harbor_hostname }}:{{ harbor_http_port }}"]
+      }
+    dest: /etc/docker/daemon.json
+    mode: "0644"
+  notify: restart docker
+  # Vì Harbor trong lab này chạy HTTP (không cấu hình TLS), Docker daemon sẽ từ
+  # chối kết nối với lỗi "http: server gave HTTP response to HTTPS client" nếu
+  # không khai báo registry này là "insecure". Production PHẢI dùng TLS thật
+  # (xem docs/03-security.md) thay vì dựa vào insecure-registries.
+
+- name: Flush handlers ngay để daemon.json có hiệu lực trước khi các role sau chạy
+  meta: flush_handlers

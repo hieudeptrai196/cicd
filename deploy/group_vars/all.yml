@@ -1,0 +1,25 @@
+---
+harbor_registry: "harbor.local"
+harbor_project: "cicd-demo"
+image_name: "app"
+
+app_container_name: "cicd-demo-app"
+app_host_port: 3000
+app_container_port: 3000
+health_check_path: "/health"
+health_check_retries: 10
+health_check_delay: 3
+
+# File trên target host dùng để nhớ "tag nào đang chạy thành công gần nhất",
+# phục vụ việc tự rollback khi deploy mới bị lỗi health-check.
+rollback_marker_file: "/opt/cicd-demo-app/current_tag"
+
+# Ngưỡng lỗ hổng bảo mật chặn deploy - xem deploy/playbook-check-scan.yml
+max_severity_allowed: "Critical"
+
+# CHỈ để placeholder cho lab. KHÔNG commit giá trị thật dạng plaintext.
+# Cách làm đúng: ansible-vault encrypt_string, hoặc tách ra file
+# group_vars/all/vault.yml rồi mã hoá cả file bằng `ansible-vault encrypt`.
+# Xem hướng dẫn chi tiết trong docs/03-security.md.
+harbor_robot_user: "robot$cicd-demo+jenkins"
+harbor_robot_password: "CHANGE_ME_VOI_ANSIBLE_VAULT"

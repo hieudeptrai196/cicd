@@ -1,0 +1,61 @@
+---
+# Sau khi Jenkins push image lên Harbor, Harbor tự kích hoạt Trivy scan image đó.
+# Playbook này gọi Harbor API, ĐỢI cho tới khi job scan chạy xong, rồi đọc kết
+# quả: nếu mức độ nghiêm trọng cao nhất tìm thấy >= max_severity_allowed thì
+# FAIL playbook - Jenkinsfile sẽ coi cả pipeline là FAILURE và không chạy tới
+# stage Deploy. Đây là ví dụ cụ thể cho khái niệm "shift-left security":
+# chặn lỗ hổng ngay ở CI, trước khi kịp lên môi trường chạy thật.
+- name: Kiem tra ket qua scan bao mat cua image vua push len Harbor
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  tasks:
+    - name: Doi Harbor hoan tat job scan (Trivy) va lay ket qua
+      uri:
+        url: >-
+          http://{{ harbor_registry }}/api/v2.0/projects/{{ harbor_project }}/repositories/
+          {{ image_name }}/artifacts/{{ image_tag }}?with_scan_overview=true
+        method: GET
+        user: "{{ harbor_robot_user }}"
+        password: "{{ harbor_robot_password }}"
+        force_basic_auth: true
+        status_code: 200
+      register: scan_result
+      until: >
+        scan_result.json.scan_overview is defined and
+        (scan_result.json.scan_overview.values() | list | first).scan_status == "Success"
+      retries: 15
+      delay: 5
+      # scan_overview là 1 dict keyed theo mime-type report (thường chỉ có 1
+      # entry) - lấy phần tử đầu tiên là đủ cho lab này.
+
+    - name: Trich xuat muc do nghiem trong cao nhat tim thay
+      set_fact:
+        highest_severity: "{{ (scan_result.json.scan_overview.values() | list | first).severity }}"
+
+    - name: In ket qua scan
+      debug:
+        msg: "Muc do lo hong cao nhat trong image {{ image_tag }}: {{ highest_severity }}"
+
+    - name: Xep hang muc do nghiem trong tu thap den cao (de so sanh nguong)
+      set_fact:
+        severity_rank:
+          "None": 0
+          "Unknown": 0
+          "Low": 1
+          "Medium": 2
+          "High": 3
+          "Critical": 4
+
+    - name: Chan deploy neu vuot nguong cho phep
+      # So sanh theo RANK chu khong phai so sanh chuoi bang nhau - vi neu
+      # max_severity_allowed = "High" thi image dinh "Critical" cung phai bi
+      # chan (Critical nghiem trong hon High), khong chi rieng truong hop
+      # trung khop tuyet doi voi nguong.
+      fail:
+        msg: >-
+          Image {{ image_tag }} co lo hong bao mat muc {{ highest_severity }},
+          vuot nguong cho phep ({{ max_severity_allowed }}). Pipeline dung lai -
+          xem chi tiet trong Harbor UI (Projects > {{ harbor_project }} > {{ image_name }}).
+      when: severity_rank[highest_severity] >= severity_rank[max_severity_allowed]

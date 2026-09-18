@@ -1,0 +1,9 @@
+---
+# Deploy app container len target server: pull image tag moi tu Harbor,
+# recreate container, health-check, tu dong rollback neu that bai.
+# Duoc goi tu Jenkinsfile o stage "Deploy (Ansible)" voi -e image_tag=<git sha>.
+- name: Deploy app container len target server
+  hosts: app_servers
+  become: true
+  roles:
+    - deploy_app

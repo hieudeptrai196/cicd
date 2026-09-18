@@ -1,0 +1,18 @@
+---
+# ===== Jenkins =====
+jenkins_home: /opt/jenkins
+jenkins_http_port: 8080
+jenkins_agent_port: 50000
+
+# ===== Harbor =====
+harbor_home: /opt/harbor
+harbor_version: "v2.11.1"
+# Đổi thành domain hoặc IP thật của server bạn. Docker client sẽ dùng đúng giá trị này
+# để pull/push, nên phải trùng khớp với những gì bạn cấu hình ở deploy/group_vars/all.yml
+harbor_hostname: "harbor.local"
+harbor_http_port: 80
+harbor_https_port: 443
+# CHỈ dùng cho lab. Với dữ liệu thật, hãy encrypt bằng ansible-vault
+# (xem docs/03-security.md) thay vì để plaintext ở đây.
+harbor_admin_password: "ChangeMe123!"
+harbor_db_password: "root123"

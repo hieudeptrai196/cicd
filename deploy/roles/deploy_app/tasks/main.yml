@@ -1,0 +1,106 @@
+---
+- name: Tao thu muc luu trang thai deploy tren target host
+  file:
+    path: "{{ rollback_marker_file | dirname }}"
+    state: directory
+    mode: "0755"
+
+- name: Kiem tra co tag dang chay tu lan deploy truoc khong
+  stat:
+    path: "{{ rollback_marker_file }}"
+  register: marker_stat
+
+- name: Doc gia tri tag hien tai (de phong khi can rollback)
+  slurp:
+    src: "{{ rollback_marker_file }}"
+  register: current_tag_raw
+  when: marker_stat.stat.exists
+
+- name: Set fact previous_tag
+  set_fact:
+    previous_tag: "{{ (current_tag_raw.content | b64decode | trim) if marker_stat.stat.exists else '' }}"
+
+- name: Dang nhap Harbor registry
+  community.docker.docker_login:
+    registry_url: "{{ harbor_registry }}"
+    username: "{{ harbor_robot_user }}"
+    password: "{{ harbor_robot_password }}"
+
+- name: Pull image moi ({{ image_tag }})
+  community.docker.docker_image:
+    name: "{{ harbor_registry }}/{{ harbor_project }}/{{ image_name }}:{{ image_tag }}"
+    source: pull
+    force_source: true
+
+- name: Chay container voi tag moi (thay the container cu neu co)
+  community.docker.docker_container:
+    name: "{{ app_container_name }}"
+    image: "{{ harbor_registry }}/{{ harbor_project }}/{{ image_name }}:{{ image_tag }}"
+    state: started
+    restart_policy: unless-stopped
+    recreate: true
+    published_ports:
+      - "{{ app_host_port }}:{{ app_container_port }}"
+    env:
+      APP_VERSION: "{{ image_tag }}"
+
+- name: Doi vai giay cho app khoi dong truoc khi health-check
+  pause:
+    seconds: 3
+
+- name: Health check endpoint {{ health_check_path }}
+  uri:
+    url: "http://localhost:{{ app_host_port }}{{ health_check_path }}"
+    status_code: 200
+  register: health_result
+  retries: "{{ health_check_retries }}"
+  delay: "{{ health_check_delay }}"
+  until: health_result.status is defined and health_result.status == 200
+  ignore_errors: true
+  # ignore_errors o day la CO CHU DICH: neu health check that bai, muon
+  # playbook di tiep xuong block rollback ben duoi thay vi dung ngang o day.
+
+- name: Rollback ve tag truoc do neu health check that bai va co tag cu
+  when: health_result.failed | default(false) and previous_tag != ''
+  block:
+    - name: Canh bao dang rollback
+      debug:
+        msg: >-
+          Health check that bai cho tag {{ image_tag }}.
+          Dang rollback ve tag truoc do: {{ previous_tag }}.
+
+    - name: Chay lai container voi tag truoc do
+      community.docker.docker_container:
+        name: "{{ app_container_name }}"
+        image: "{{ harbor_registry }}/{{ harbor_project }}/{{ image_name }}:{{ previous_tag }}"
+        state: started
+        restart_policy: unless-stopped
+        recreate: true
+        published_ports:
+          - "{{ app_host_port }}:{{ app_container_port }}"
+        env:
+          APP_VERSION: "{{ previous_tag }}"
+
+    - name: Fail playbook de Jenkins biet deploy KHONG thanh cong
+      fail:
+        msg: >-
+          Deploy tag {{ image_tag }} that bai (health check khong qua).
+          Da tu dong rollback ve tag {{ previous_tag }}, server van dang chay binh
+          thuong nhung o phien ban CU. Can kiem tra lai code/image cua tag moi.
+      # QUAN TRONG: du da rollback thanh cong, van fail playbook nay. Ly do:
+      # muc tieu cua build la deploy tag MOI, khong phai "server con chay la du".
+      # Neu khong fail o day, Jenkins se bao build XANH trong khi thuc te
+      # tinh nang moi chua len duoc production - rat de gay nham lan.
+
+- name: Fail neu health check that bai va KHONG co tag truoc do de rollback
+  fail:
+    msg: >-
+      Deploy tag {{ image_tag }} that bai va khong co tag nao truoc do de
+      rollback (co le day la lan deploy dau tien). Can can thiep thu cong.
+  when: health_result.failed | default(false) and previous_tag == ''
+
+- name: Ghi lai tag hien tai dang chay thanh cong (de dung cho lan rollback sau)
+  copy:
+    content: "{{ image_tag }}"
+    dest: "{{ rollback_marker_file }}"
+  when: not (health_result.failed | default(false))
