@@ -3,6 +3,38 @@
 File này để bạn tự cập nhật mỗi lần học tiếp — checklist tiến độ, câu hỏi còn thắc
 mắc, và ghi chú của riêng bạn. Không cần commit chỉnh chu, cứ ghi thoải mái như sổ tay.
 
+## Bối cảnh — đọc phần này nếu bạn mở lại bằng 1 phiên chat/trợ lý khác
+
+**Mục tiêu**: học Jenkins + Harbor + Ansible đủ sâu (kể cả các case lỗi/edge case) để
+trình bày tự tin trong 1 buổi phỏng vấn DevOps/CI-CD — ưu tiên hiểu chắc hơn tốc độ.
+
+**Repo**: https://github.com/hieudeptrai196/cicd (nhánh `main`) — clone hoặc mở lại
+`D:\private_project\cicdlearning` là đủ, không cần kể lại lịch sử chat cũ.
+
+**Đã có gì (xem tóm tắt ở `README.md` và "Checklist tiến độ" bên dưới)**: toàn bộ code/
+playbook cho 1 pipeline CI/CD đầy đủ — `infra/` (Ansible provision Docker + Jenkins +
+Harbor), `app/` (REST API Node.js mẫu + Jenkinsfile), `deploy/` (Ansible deploy có
+health-check + auto-rollback), `docs/01`–`05` (khái niệm, luồng pipeline, bảo mật,
+failure case, Q&A phỏng vấn — tất cả tiếng Việt). App đã test chạy thật (pass), nhưng
+`infra/` và `deploy/` **CHƯA từng chạy trên server thật** vì lúc dựng chưa có VPS.
+
+**Trạng thái tại thời điểm ghi chú này (2026-09-18)**: chưa mua VPS. Kế hoạch: mua VPS
+(dự kiến 2026-09-19), sau đó chạy provisioning + pipeline lần đầu tiên.
+
+**Cách bạn muốn được hướng dẫn tiếp** (nói rõ với trợ lý mới nếu cần): **cầm tay chỉ
+việc, đi từng bước một** — chạy 1 bước, giải thích bước đó đang làm gì/vì sao, nêu các
+case lỗi có thể xảy ra ngay tại bước đó (đối chiếu `docs/04-failure-cases.md`), xác
+nhận bạn hiểu rồi mới sang bước tiếp theo. KHÔNG chạy toàn bộ `ansible-playbook
+playbook-provision.yml` một lèo rồi báo cáo kết quả cuối — mục đích là hiểu, không chỉ
+là có pipeline chạy được.
+
+**Việc cần làm khi có VPS** (chi tiết ở checklist bên dưới): điền IP/SSH user thật vào
+`infra/inventory/hosts.ini` và `deploy/inventory/hosts.ini`, đồng bộ `harbor_hostname`/
+`harbor_registry`/`HARBOR_REGISTRY` giữa `infra/group_vars/all.yml`,
+`deploy/group_vars/all.yml`, `app/Jenkinsfile`, rồi mới bắt đầu chạy
+`infra/playbook-provision.yml` — từng role một (docker → jenkins → harbor), không
+chạy full playbook ngay nếu muốn hiểu kỹ từng phần.
+
 ## Checklist tiến độ
 
 ### Đã xong (dựng cùng trợ lý)
